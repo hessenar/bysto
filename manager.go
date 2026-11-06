@@ -1,6 +1,7 @@
 package bysto
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -41,7 +42,8 @@ func (m *Manager) Get(index int) ([]byte, error) {
 }
 
 // Set stores data as a new entry in storage and points the record at it.
-// The previous data is left in place until a rebuild reclaims it.
+// When storage is full, it rebuilds to free unreferenced data and retries; if that
+// does not free enough room, it rebuilds with 50% more sections.
 func (m *Manager) Set(index int, data []byte) error {
 	if index < 0 || index >= len(m.lens) {
 		return fmt.Errorf("record %d: %w", index, ErrOutOfBounds)
@@ -50,11 +52,37 @@ func (m *Manager) Set(index int, data []byte) error {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
 
+	orphaned, err := m.write(index, data)
+	if errors.Is(err, ErrStorageFull) {
+		if err = m.rebuild(m.storage.maxSections); err != nil {
+			return err
+		}
+		if orphaned, err = m.write(index, data); errors.Is(err, ErrStorageFull) {
+			if err = m.rebuild(grownSectionCount(m.storage.maxSections)); err != nil {
+				return err
+			}
+			orphaned, err = m.write(index, data)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("record %d: %w", index, err)
+	}
+
+	if orphaned || m.storage.Usage() >= m.rebuildThreshold {
+		return m.compact()
+	}
+	return nil
+}
+
+// write appends data and points the record at it. It reports whether the record's
+// previous section was left without any referencing record.
+func (m *Manager) write(index int, data []byte) (bool, error) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	sid, offset, length, err := m.storage.Append(data)
 	if err != nil {
-		m.mu.Unlock()
-		return fmt.Errorf("record %d: %w", index, err)
+		return false, err
 	}
 
 	oldSid, oldLen := m.sectionId[index], m.lens[index]
@@ -62,25 +90,30 @@ func (m *Manager) Set(index int, data []byte) error {
 	if length > 0 {
 		m.refs = incRef(m.refs, sid)
 	}
-	orphaned := false
-	if oldLen > 0 {
-		m.refs[oldSid]--
-		orphaned = m.refs[oldSid] == 0
+	if oldLen == 0 {
+		return false, nil
 	}
-	usage := m.storage.Usage()
-	m.mu.Unlock()
+	m.refs[oldSid]--
+	return m.refs[oldSid] == 0, nil
+}
 
-	if orphaned || usage >= m.rebuildThreshold {
-		return m.rebuild()
+// compact rebuilds with the current section count. If the live data still reaches
+// the threshold, it rebuilds with 50% more sections.
+func (m *Manager) compact() error {
+	if err := m.rebuild(m.storage.maxSections); err != nil {
+		return err
+	}
+	if m.storage.Usage() >= m.rebuildThreshold {
+		return m.rebuild(grownSectionCount(m.storage.maxSections))
 	}
 	return nil
 }
 
-// rebuild copies all active records into a new storage packed from the beginning.
-// The caller must hold writeMu. Readers keep using the current storage during the copy
-// and are only blocked for the final swap.
-func (m *Manager) rebuild() error {
-	next := NewStorage(m.storage.maxSections, m.storage.size)
+// rebuild copies all active records into a new storage with sectionCount sections,
+// packed contiguously from the beginning. The caller must hold writeMu. Readers keep
+// using the current storage during the copy and are only blocked for the final swap.
+func (m *Manager) rebuild(sectionCount int) error {
+	next := NewStorage(sectionCount, m.storage.size)
 	n := len(m.lens)
 	sectionIDs := make([]uint32, n)
 	offsets := make([]uint32, n)
@@ -111,6 +144,11 @@ func (m *Manager) rebuild() error {
 	m.lens = lens
 	m.refs = refs
 	return nil
+}
+
+// grownSectionCount returns the section count 50% above n, rounded up.
+func grownSectionCount(n int) int {
+	return n + (n+1)/2
 }
 
 // incRef increments the reference count of section sid, growing refs when a new section appears.

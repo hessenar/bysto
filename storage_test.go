@@ -36,6 +36,16 @@ func TestStorageAppendOpensNewSectionWhenFull(t *testing.T) {
 	assert.Len(t, s.sections, 2)
 }
 
+func TestStorageAppendReturnsErrStorageFullWhenSectionLimitReached(t *testing.T) {
+	s := NewStorage(1, 4)
+	_, _, _, err := s.Append([]byte("123"))
+	require.NoError(t, err)
+
+	_, _, _, err = s.Append([]byte("456"))
+	assert.ErrorIs(t, err, ErrStorageFull)
+	assert.Len(t, s.sections, 1)
+}
+
 func TestStorageAppendRejectsDataLargerThanSection(t *testing.T) {
 	s := NewStorage(1, 4)
 
