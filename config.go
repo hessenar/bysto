@@ -16,9 +16,12 @@ type Config struct {
 	RebuildThreshold    float64 `env:"REBUILD_THRESHOLD" envDefault:"80" validate:"gt=0,lte=100"`
 }
 
-func LoadConfig() (Config, error) {
+func LoadConfig(prefix string) (Config, error) {
 	var cfg Config
-	if err := env.ParseWithOptions(&cfg, env.Options{Prefix: envPrefix}); err != nil {
+	if len(prefix) == 0 {
+		prefix = envPrefix
+	}
+	if err := env.ParseWithOptions(&cfg, env.Options{Prefix: prefix}); err != nil {
 		return Config{}, fmt.Errorf("parse config from env: %w", err)
 	}
 	if err := validator.New().Struct(cfg); err != nil {

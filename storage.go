@@ -9,6 +9,7 @@ import (
 var (
 	ErrOutOfBounds  = errors.New("out of bounds")
 	ErrDataTooLarge = errors.New("data exceeds section size")
+	ErrStorageFull  = errors.New("storage full")
 )
 
 type Storage struct {
@@ -58,6 +59,9 @@ func (s *Storage) Append(b []byte) (uint32, uint32, uint32, error) {
 	}
 	lastID := len(s.sections) - 1
 	if len(s.sections[lastID])+len(b) > s.size {
+		if len(s.sections) >= s.maxSections {
+			return 0, 0, 0, fmt.Errorf("%d sections: %w", len(s.sections), ErrStorageFull)
+		}
 		s.sections = append(s.sections, make([]byte, 0, s.size))
 		lastID++
 	}

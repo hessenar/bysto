@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestManager(records, sectionCount, sectionSize int, threshold float64) *Manager {
+func newTestManager(recordCount, sectionCount, sectionSize int, threshold float64) *Manager {
 	return NewStorageManager(Config{
-		RecordsCount:        records,
+		RecordsCount:        recordCount,
 		StorageSectionCount: sectionCount,
 		StorageSectionSize:  sectionSize,
 		RebuildThreshold:    threshold,
@@ -127,7 +127,7 @@ func TestManagerRebuildOnThreshold(t *testing.T) {
 }
 
 func TestManagerRebuildWhenSectionUnreferenced(t *testing.T) {
-	m := newTestManager(2, 2, 10, 1000)
+	m := newTestManager(2, 3, 10, 1000)
 	require.NoError(t, m.Set(0, bytes.Repeat([]byte("a"), 8)))
 	require.NoError(t, m.Set(1, bytes.Repeat([]byte("b"), 8)))
 	require.Len(t, m.storage.sections, 2)
@@ -178,6 +178,49 @@ func TestManagerConcurrentReadsAndWrites(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestManagerGrowsWhenCompactionCannotFreeSpace(t *testing.T) {
+	m := newTestManager(2, 2, 10, 1000)
+	a := bytes.Repeat([]byte("a"), 8)
+	b := bytes.Repeat([]byte("b"), 8)
+	c := bytes.Repeat([]byte("c"), 8)
+
+	require.NoError(t, m.Set(0, a))
+	require.NoError(t, m.Set(1, b))
+	require.NoError(t, m.Set(0, c))
+
+	assert.Equal(t, 3, m.storage.maxSections)
+	got0, err := m.Get(0)
+	require.NoError(t, err)
+	assert.Equal(t, c, got0)
+	got1, err := m.Get(1)
+	require.NoError(t, err)
+	assert.Equal(t, b, got1)
+}
+
+func TestManagerGrowsWhenLiveDataExceedsThreshold(t *testing.T) {
+	m := newTestManager(2, 2, 10, 50)
+	first := bytes.Repeat([]byte("a"), 6)
+	second := bytes.Repeat([]byte("b"), 6)
+
+	require.NoError(t, m.Set(0, first))
+	require.NoError(t, m.Set(1, second))
+
+	assert.Equal(t, 3, m.storage.maxSections)
+	got0, err := m.Get(0)
+	require.NoError(t, err)
+	assert.Equal(t, first, got0)
+	got1, err := m.Get(1)
+	require.NoError(t, err)
+	assert.Equal(t, second, got1)
+}
+
+func TestGrownSectionCount(t *testing.T) {
+	assert.Equal(t, 2, grownSectionCount(1))
+	assert.Equal(t, 3, grownSectionCount(2))
+	assert.Equal(t, 5, grownSectionCount(3))
+	assert.Equal(t, 12, grownSectionCount(8))
 }
 
 func TestIncRefGrowsSlice(t *testing.T) {
