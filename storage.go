@@ -12,26 +12,26 @@ var (
 	ErrStorageFull  = errors.New("storage full")
 )
 
-type Storage struct {
+type storage struct {
 	sections    [][]byte
 	size        int
 	maxSections int
 }
 
-func NewStorage(sectionCount, sectionSize int) *Storage {
+func newStorage(sectionCount, sectionSize int) *storage {
 	sections := make([][]byte, 0, sectionCount)
 	sections = append(sections, make([]byte, 0, sectionSize))
-	return &Storage{
+	return &storage{
 		sections:    sections,
 		size:        sectionSize,
 		maxSections: sectionCount,
 	}
 }
 
-// GetRefData returns a view of the stored bytes without copying.
+// getRefData returns a view of the stored bytes without copying.
 // The capacity is capped so appends to the result cannot write into storage.
 // TODO: wrap the result in an immutable type so element writes are also prevented.
-func (s *Storage) GetRefData(sectionID, offset, length int) ([]byte, error) {
+func (s *storage) getRefData(sectionID, offset, length int) ([]byte, error) {
 	if sectionID < 0 || sectionID >= len(s.sections) {
 		return nil, fmt.Errorf("section %d: %w", sectionID, ErrOutOfBounds)
 	}
@@ -43,17 +43,17 @@ func (s *Storage) GetRefData(sectionID, offset, length int) ([]byte, error) {
 	return section[offset:end:end], nil
 }
 
-func (s *Storage) GetCopy(sectionID, offset, length int) ([]byte, error) {
-	ref, err := s.GetRefData(sectionID, offset, length)
+func (s *storage) getCopy(sectionID, offset, length int) ([]byte, error) {
+	ref, err := s.getRefData(sectionID, offset, length)
 	if err != nil {
 		return nil, err
 	}
 	return bytes.Clone(ref), nil
 }
 
-// Append writes b to the end of the last section, opening a new section if needed.
+// append writes b to the end of the last section, opening a new section if needed.
 // It returns the section ID, offset and length of the written data.
-func (s *Storage) Append(b []byte) (uint32, uint32, uint32, error) {
+func (s *storage) append(b []byte) (uint32, uint32, uint32, error) {
 	if len(b) > s.size {
 		return 0, 0, 0, fmt.Errorf("%d bytes: %w", len(b), ErrDataTooLarge)
 	}
@@ -71,8 +71,8 @@ func (s *Storage) Append(b []byte) (uint32, uint32, uint32, error) {
 	return uint32(lastID), uint32(offset), uint32(len(b)), nil
 }
 
-// Usage returns the percentage of nominal capacity (maxSections * size) occupied by stored bytes.
-func (s *Storage) Usage() float64 {
+// usage returns the percentage of nominal capacity (maxSections * size) occupied by stored bytes.
+func (s *storage) usage() float64 {
 	capacity := s.maxSections * s.size
 	if capacity == 0 {
 		return 0

@@ -15,7 +15,7 @@ type Manager struct {
 	lens      []uint32
 	refs      []int // number of active records referencing each section, indexed by section ID
 
-	storage          *Storage
+	storage          *storage
 	rebuildThreshold float64 // storage usage percentage that triggers a rebuild
 }
 
@@ -26,9 +26,17 @@ func NewStorageManager(cfg Config) *Manager {
 		lens:      make([]uint32, cfg.RecordsCount),
 		refs:      make([]int, 0, cfg.StorageSectionCount),
 
-		storage:          NewStorage(cfg.StorageSectionCount, cfg.StorageSectionSize),
+		storage:          newStorage(cfg.StorageSectionCount, cfg.StorageSectionSize),
 		rebuildThreshold: cfg.RebuildThreshold,
 	}
+}
+
+func (m *Manager) GetStorageInfo() (size, storageSectionCount, storageSectionSize int, storageUsage float64) {
+	size = len(m.sectionId)
+	storageSectionCount = len(m.storage.sections)
+	storageSectionSize = m.storage.size
+	usage := m.storage.usage()
+	return size, storageSectionCount, storageSectionSize, usage
 }
 
 func (m *Manager) Get(index int) ([]byte, error) {
@@ -38,7 +46,7 @@ func (m *Manager) Get(index int) ([]byte, error) {
 	if index < 0 || index >= len(m.lens) {
 		return nil, fmt.Errorf("record %d: %w", index, ErrOutOfBounds)
 	}
-	return m.storage.GetCopy(int(m.sectionId[index]), int(m.offsets[index]), int(m.lens[index]))
+	return m.storage.getCopy(int(m.sectionId[index]), int(m.offsets[index]), int(m.lens[index]))
 }
 
 // Set stores data as a new entry in storage and points the record at it.
@@ -68,7 +76,7 @@ func (m *Manager) Set(index int, data []byte) error {
 		return fmt.Errorf("record %d: %w", index, err)
 	}
 
-	if orphaned || m.storage.Usage() >= m.rebuildThreshold {
+	if orphaned || m.storage.usage() >= m.rebuildThreshold {
 		return m.compact()
 	}
 	return nil
@@ -80,7 +88,7 @@ func (m *Manager) write(index int, data []byte) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	sid, offset, length, err := m.storage.Append(data)
+	sid, offset, length, err := m.storage.append(data)
 	if err != nil {
 		return false, err
 	}
@@ -103,7 +111,7 @@ func (m *Manager) compact() error {
 	if err := m.rebuild(m.storage.maxSections); err != nil {
 		return err
 	}
-	if m.storage.Usage() >= m.rebuildThreshold {
+	if m.storage.usage() >= m.rebuildThreshold {
 		return m.rebuild(grownSectionCount(m.storage.maxSections))
 	}
 	return nil
@@ -113,7 +121,7 @@ func (m *Manager) compact() error {
 // packed contiguously from the beginning. The caller must hold writeMu. Readers keep
 // using the current storage during the copy and are only blocked for the final swap.
 func (m *Manager) rebuild(sectionCount int) error {
-	next := NewStorage(sectionCount, m.storage.size)
+	next := newStorage(sectionCount, m.storage.size)
 	n := len(m.lens)
 	sectionIDs := make([]uint32, n)
 	offsets := make([]uint32, n)
@@ -124,11 +132,11 @@ func (m *Manager) rebuild(sectionCount int) error {
 		if m.lens[i] == 0 {
 			continue
 		}
-		data, err := m.storage.GetRefData(int(m.sectionId[i]), int(m.offsets[i]), int(m.lens[i]))
+		data, err := m.storage.getRefData(int(m.sectionId[i]), int(m.offsets[i]), int(m.lens[i]))
 		if err != nil {
 			return fmt.Errorf("rebuild record %d: %w", i, err)
 		}
-		sid, offset, length, err := next.Append(data)
+		sid, offset, length, err := next.append(data)
 		if err != nil {
 			return fmt.Errorf("rebuild record %d: %w", i, err)
 		}
