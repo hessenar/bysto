@@ -8,15 +8,15 @@ import (
 )
 
 func TestStorageAppendReturnsSectionOffsetAndLength(t *testing.T) {
-	s := NewStorage(2, 10)
+	s := newStorage(2, 10)
 
-	sid, off, ln, err := s.Append([]byte("abc"))
+	sid, off, ln, err := s.append([]byte("abc"))
 	require.NoError(t, err)
 	assert.Equal(t, uint32(0), sid)
 	assert.Equal(t, uint32(0), off)
 	assert.Equal(t, uint32(3), ln)
 
-	sid, off, ln, err = s.Append([]byte("defg"))
+	sid, off, ln, err = s.append([]byte("defg"))
 	require.NoError(t, err)
 	assert.Equal(t, uint32(0), sid)
 	assert.Equal(t, uint32(3), off)
@@ -24,11 +24,11 @@ func TestStorageAppendReturnsSectionOffsetAndLength(t *testing.T) {
 }
 
 func TestStorageAppendOpensNewSectionWhenFull(t *testing.T) {
-	s := NewStorage(2, 10)
-	_, _, _, err := s.Append([]byte("aaaaaa"))
+	s := newStorage(2, 10)
+	_, _, _, err := s.append([]byte("aaaaaa"))
 	require.NoError(t, err)
 
-	sid, off, ln, err := s.Append([]byte("bbbbbb"))
+	sid, off, ln, err := s.append([]byte("bbbbbb"))
 	require.NoError(t, err)
 	assert.Equal(t, uint32(1), sid)
 	assert.Equal(t, uint32(0), off)
@@ -37,26 +37,26 @@ func TestStorageAppendOpensNewSectionWhenFull(t *testing.T) {
 }
 
 func TestStorageAppendReturnsErrStorageFullWhenSectionLimitReached(t *testing.T) {
-	s := NewStorage(1, 4)
-	_, _, _, err := s.Append([]byte("123"))
+	s := newStorage(1, 4)
+	_, _, _, err := s.append([]byte("123"))
 	require.NoError(t, err)
 
-	_, _, _, err = s.Append([]byte("456"))
+	_, _, _, err = s.append([]byte("456"))
 	assert.ErrorIs(t, err, ErrStorageFull)
 	assert.Len(t, s.sections, 1)
 }
 
 func TestStorageAppendRejectsDataLargerThanSection(t *testing.T) {
-	s := NewStorage(1, 4)
+	s := newStorage(1, 4)
 
-	_, _, _, err := s.Append([]byte("12345"))
+	_, _, _, err := s.append([]byte("12345"))
 	assert.ErrorIs(t, err, ErrDataTooLarge)
 	assert.Empty(t, s.sections[0])
 }
 
 func TestStorageGetRefDataOutOfBounds(t *testing.T) {
-	s := NewStorage(1, 10)
-	_, _, _, err := s.Append([]byte("hello"))
+	s := newStorage(1, 10)
+	_, _, _, err := s.append([]byte("hello"))
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -73,47 +73,47 @@ func TestStorageGetRefDataOutOfBounds(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := s.GetRefData(tt.sectionID, tt.offset, tt.length)
+			_, err := s.getRefData(tt.sectionID, tt.offset, tt.length)
 			assert.ErrorIs(t, err, ErrOutOfBounds)
 		})
 	}
 }
 
 func TestStorageGetRefDataCapsCapacity(t *testing.T) {
-	s := NewStorage(1, 10)
-	_, _, _, err := s.Append([]byte("hello"))
+	s := newStorage(1, 10)
+	_, _, _, err := s.append([]byte("hello"))
 	require.NoError(t, err)
 
-	ref, err := s.GetRefData(0, 1, 3)
+	ref, err := s.getRefData(0, 1, 3)
 	require.NoError(t, err)
 	assert.Equal(t, []byte("ell"), ref)
 	assert.Equal(t, len(ref), cap(ref))
 }
 
 func TestStorageGetCopyIsIndependent(t *testing.T) {
-	s := NewStorage(1, 10)
-	_, _, _, err := s.Append([]byte("hello"))
+	s := newStorage(1, 10)
+	_, _, _, err := s.append([]byte("hello"))
 	require.NoError(t, err)
 
-	cp, err := s.GetCopy(0, 0, 5)
+	cp, err := s.getCopy(0, 0, 5)
 	require.NoError(t, err)
 	cp[0] = 'X'
 
-	ref, err := s.GetRefData(0, 0, 5)
+	ref, err := s.getRefData(0, 0, 5)
 	require.NoError(t, err)
 	assert.Equal(t, []byte("hello"), ref)
 }
 
 func TestStorageUsage(t *testing.T) {
-	s := NewStorage(2, 10)
-	assert.InDelta(t, 0.0, s.Usage(), 0.0001)
+	s := newStorage(2, 10)
+	assert.InDelta(t, 0.0, s.usage(), 0.0001)
 
-	_, _, _, err := s.Append(make([]byte, 5))
+	_, _, _, err := s.append(make([]byte, 5))
 	require.NoError(t, err)
-	assert.InDelta(t, 25.0, s.Usage(), 0.0001)
+	assert.InDelta(t, 25.0, s.usage(), 0.0001)
 }
 
 func TestStorageUsageWithZeroCapacity(t *testing.T) {
-	s := NewStorage(0, 0)
-	assert.InDelta(t, 0.0, s.Usage(), 0.0001)
+	s := newStorage(0, 0)
+	assert.InDelta(t, 0.0, s.usage(), 0.0001)
 }
