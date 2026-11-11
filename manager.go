@@ -31,14 +31,6 @@ func NewStorageManager(cfg Config) *Manager {
 	}
 }
 
-func (m *Manager) GetStorageInfo() (size, storageSectionCount, storageSectionSize int, storageUsage float64) {
-	size = len(m.sectionId)
-	storageSectionCount = len(m.storage.sections)
-	storageSectionSize = m.storage.size
-	usage := m.storage.usage()
-	return size, storageSectionCount, storageSectionSize, usage
-}
-
 func (m *Manager) Get(index int) ([]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
